@@ -308,12 +308,22 @@ def rust_inputs(artifact, saved):
     target = target.parent  # Cargo's generated OUT_DIR inputs live under this owned target.
     roots = {Path(root).resolve(): value["files"] for root, value in saved["sources_before"].items()}
     for name in words:
-        path = Path(name).resolve()
+        path = Path(name)
+        if not path.is_absolute():
+            # rustc records relative paths from the build workspace.
+            bases = [root for root in roots if (root / path).exists()]
+            if not bases:
+                continue  # Unused build-script watch path.
+            require(len(bases) == 1, f"compiled input is ambiguous between source roots: {name}")
+            path = bases[0] / path
+        path = path.resolve()
         if path.is_relative_to(target):
             continue  # Generated sources are outputs of the recorded build scripts.
         for root, files in roots.items():
             if path.is_relative_to(root):
                 relative = path.relative_to(root).as_posix()
+                if relative not in files and not path.exists():
+                    break  # A missing watch path contributes no input.
                 require(relative in files, f"compiled local input was outside the before-inventory: {path}")
                 require(evidence.sha(path) == files[relative], f"compiled local input changed: {path}")
                 local[str(path)] = files[relative]

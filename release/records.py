@@ -36,7 +36,6 @@ FILES = Path(os.environ.get("TENRAI_MAINNET_FILES", GITHUB / "tenrai-mainnet-fil
 DOCUMENTS = [
     (GITHUB / "tenrai-docs" / "src" / "content" / "docs" / "en" / "understand" / "reference" / "parameters.md",
      "## Mainnet identity"),
-    (REPO / "docs" / "runbooks" / "mainnet-production-qualification.md", "## Prelaunch consensus identity"),
     (FILES / "genesis" / "native-locks-protocol-v2.md", None),
     (GITHUB / "tenrai-api" / "README.md", None),
 ]
@@ -382,7 +381,7 @@ def readme_release(name, record):
         "| `sdk/` | The SDK as an npm package |",
         "| `config/` | The built-in mainnet manifest, chain and genesis anchors, example settings of the node and both pools |",
         "| `docs/run/` | Install and operation guides |",
-        "| `docs/qualification/` | The qualification matrix, committee and stake, mining under load, TSP-2 security |",
+        "| `docs/qualification/` | Committee and stake |",
         "| `genesis/`, `previous/`, `logs/`, `checks/` | The genesis step, the files it replaced, every step's log, check results |",
         "",
         "| Binary | SHA-256 |",

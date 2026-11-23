@@ -64,7 +64,6 @@ if [ $rehearse -eq 0 ]; then
   if [ "$from" != genesis ]; then
     committed+=(--allow-change "$(win "$REPO")=config/mainnet.traidag.json"
       --allow-change "$(win "$REPO")=config/mainnet.genesis-id"
-      --allow-change "$(win "$REPO")=docs/runbooks/mainnet-production-qualification.md"
       --allow-change "$(win "$GITHUB/tenrai-api")=README.md"
       --allow-change "$(win "$GITHUB/tenrai-docs")=src/content/docs/en/understand/reference/parameters.md")
   fi
@@ -137,7 +136,6 @@ boundary_begin() {
       --allow-change "$(win "$REPO")=config/mainnet.traidag.json"
       --allow-change "$(win "$REPO")=config/mainnet.genesis-id") ;;
     records-identity) kind=mutation; args+=(--repo "$(win "$REPO")" --repo "$(win "$GITHUB/tenrai-api")" --repo "$(win "$GITHUB/tenrai-docs")"
-      --allow-change "$(win "$REPO")=docs/runbooks/mainnet-production-qualification.md"
       --allow-change "$(win "$GITHUB/tenrai-api")=README.md"
       --allow-change "$(win "$GITHUB/tenrai-docs")=src/content/docs/en/understand/reference/parameters.md") ;;
     desktop-source) kind=setup; args+=(--repo "$(win "$GITHUB/tenrai-webwallet")") ;;
@@ -351,10 +349,23 @@ phase_wasm() {
   grep -aE "revision|built|verified|done" "$L/wasm-packages.log" | cut -c1-200 | tee -a "$OUT/release.log"
 }
 
-# The web apps take the packages, build and test; the paper wallet embeds a no-modules wallet WASM.
+# Remap compiler and dependency paths before embedding the paper wallet WASM.
 paper_wasm() {
-  (cd "$REPO" && CARGO_TARGET_DIR="$(win "$SCRATCH/targets/paper-wasm")" timeout 3600 wasm-pack build crates/wasm --target no-modules --release \
-    --out-dir "$(win "$SCRATCH/wasm-no-modules")" --out-name tenrai_wasm)
+  local cargo_home sysroot pair source destination form flags=() seen=" "
+  cargo_home=$(win "${CARGO_HOME:-$HOME/.cargo}")
+  sysroot=$(cd "$REPO" && rustc --print sysroot | tr -d '\r') || return 1
+  for pair in "$cargo_home=/cargo" "$sysroot=/rust-sysroot" "$sysroot\\lib\\rustlib\\src\\rust=/rust"; do
+    source=${pair%=*}
+    destination=${pair##*=}
+    for form in "$source" "${source//\\//}"; do
+      case "$seen" in *" $form "*) continue ;; esac
+      seen="$seen$form "
+      flags+=("--remap-path-prefix=$form=$destination")
+    done
+  done
+  (cd "$REPO" && CARGO_ENCODED_RUSTFLAGS="$(IFS=$'\x1f'; echo "${flags[*]}")" \
+    CARGO_TARGET_DIR="$(win "$SCRATCH/targets/paper-wasm")" timeout 3600 wasm-pack build crates/wasm --target no-modules \
+    --release --out-dir "$(win "$SCRATCH/wasm-no-modules")" --out-name tenrai_wasm)
 }
 paper_wallet() { (cd "$GITHUB/tenrai-paper-wallet" && node scripts/build.mjs "$(win "$SCRATCH/wasm-no-modules")" && npm test); }
 # A web app goes out as its public sources, never as its working folder: ignored local files such as a build cache or
@@ -508,17 +519,8 @@ phase_checks() {
   # With private transfers from genesis, the private tests among these take the path of the mainnet.
   local genesis_env=()
   [ "$private" = yes ] && genesis_env=(--env TENRAI_PRIVATE_FROM_GENESIS=1)
-  # Run recovery and snapshot checks in phases to stay within the per-test timeout.
+  # Run the shorter acceptance checks before the phased recovery and package runs.
   local acceptance=p2p::validator_overlay::decentralized_finality_tests
-  local offline="$acceptance::full_nodes_alone::private_long_offline::an_existing_full_node_recovers_private_money_from"
-  check private-long-offline-pruned phases "$name" "$room" private-long-offline-pruned 8 \
-    "${offline}_pruned_after_all_providers_forget_its_history" "${genesis_env[@]}"
-  check private-long-offline-full offline_from_full "$name" "$room" 3 \
-    "${offline}_full_after_all_providers_forget_its_history" "${genesis_env[@]}"
-  check package-join phases "$name" "$room" package-join 3 \
-    "$acceptance::package_join::a_validator_started_from_a_package_carries_the_quorum" "${genesis_env[@]}"
-  check package-join-pruned phases "$name" "$room" package-join-pruned 3 \
-    "$acceptance::package_join::a_validator_on_pruned_storage_started_from_a_package_carries_the_quorum" "${genesis_env[@]}"
   check full-nodes-alone testrun "$name" "$acceptance::full_nodes_alone::full_nodes_alone_carry_the_network" \
     --expect "$acceptance::full_nodes_alone::full_nodes_alone_carry_the_network_and_a_validator_comes_back_after_they_let_go_of_its_height" \
     "${genesis_env[@]}" --timeout 3600 --room "$room"
@@ -539,13 +541,22 @@ phase_checks() {
     --expect chain::private_tests::validators::cross_pool::executed_normal_work_filters_and_evicts_a_conflicting_enter_on_every_node \
     --timeout 3600 --room "$room"
   if [ "$private" = yes ]; then
-    # The two long offline recoveries run first in this phase, in phases of their own.
     check private-from-genesis testrun "$name" private --env TENRAI_PRIVATE_FROM_GENESIS=1 --min-tests 40 \
       --expect chain::private_tests::validators::cross_pool::a_finalized_enter_evicts_normal_payments_and_bonds_and_releases_their_leases \
       --expect chain::private_tests::validators::cross_pool::executed_normal_work_filters_and_evicts_a_conflicting_enter_on_every_node \
       --timeout 3600 --room "$room" -- --skip private_transfers_on_disk_measured --skip private_load \
       --skip private_long_offline
   fi
+  # Run recovery and snapshot checks in phases to stay within the per-test timeout.
+  local offline="$acceptance::full_nodes_alone::private_long_offline::an_existing_full_node_recovers_private_money_from"
+  check private-long-offline-pruned phases "$name" "$room" private-long-offline-pruned 8 \
+    "${offline}_pruned_after_all_providers_forget_its_history" "${genesis_env[@]}"
+  check private-long-offline-full offline_from_full "$name" "$room" 3 \
+    "${offline}_full_after_all_providers_forget_its_history" "${genesis_env[@]}"
+  check package-join phases "$name" "$room" package-join 3 \
+    "$acceptance::package_join::a_validator_started_from_a_package_carries_the_quorum" "${genesis_env[@]}"
+  check package-join-pruned phases "$name" "$room" package-join-pruned 3 \
+    "$acceptance::package_join::a_validator_on_pruned_storage_started_from_a_package_carries_the_quorum" "${genesis_env[@]}"
   gate 8 "$(win "$OUT")=12" || return 1
   check tenq-production tenq_production
   check crate-tests crate_tests
@@ -566,8 +577,7 @@ release_files() {
   cp -f "$GITHUB/tenrai-pool/pool.example.json" "$OUT/config/pool.example.json" || return 1
   cp -f "$GITHUB/tenrai-reference-pool/pool.example.json" "$OUT/config/reference-pool.example.json" || return 1
   cp -r "$GITHUB/tenrai-docs/src/content/docs/en/run/." "$OUT/docs/run/" || return 1
-  cp -f "$REPO/docs/mainnet-qualification.md" "$REPO/docs/mining-under-load.md" "$REPO/docs/security/committee-and-stake.md" \
-    "$REPO/docs/tsp2/security-closure.md" "$REPO/docs/tsp2/z4-rank-test.md" "$OUT/docs/qualification/"
+  cp -f "$REPO/docs/security/committee-and-stake.md" "$OUT/docs/qualification/"
 }
 sources() {
   local args=(--repo "$(win "$REPO")" --repo "$(win "$TESTS")") repo

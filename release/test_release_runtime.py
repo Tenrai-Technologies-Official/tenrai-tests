@@ -233,11 +233,21 @@ class CommandSourceBoundaries(unittest.TestCase):
                  "sources_before": {str(self.repo): {"files": {"source.rs": evidence.sha(source)}}}}
         checked = runtime.rust_inputs(target, saved)
         self.assertEqual(checked["local_inputs_sha256"], {str(source.resolve()): evidence.sha(source)})
+        # Missing build-script watch paths do not count as inputs.
+        absent = [self.repo / "capabilities", self.repo / "prover/x86_64-pc-windows-msvc/tool.exe"]
+        target.with_suffix(".d").write_text(escaped(target) + ": " + " ".join(escaped(path) for path in [source, *absent]) + "\n")
+        checked = runtime.rust_inputs(target, saved)
+        self.assertEqual(checked["local_inputs_sha256"], {str(source.resolve()): evidence.sha(source)})
+        # Resolve relative paths from the build workspace.
+        target.with_suffix(".d").write_text(escaped(target) + ": " + escaped(source.name) + " missing.rs\n")
+        checked = runtime.rust_inputs(target, saved)
+        self.assertEqual(checked["local_inputs_sha256"], {str(source.resolve()): evidence.sha(source)})
         unlisted = self.repo / "unlisted.rs"
         unlisted.write_text("not in the compiled-input boundary\n")
-        target.with_suffix(".d").write_text(escaped(target) + ": " + escaped(unlisted) + "\n")
-        with self.assertRaises(evidence.GateError):
-            runtime.rust_inputs(target, saved)
+        for named in (unlisted, unlisted.name):
+            target.with_suffix(".d").write_text(escaped(target) + ": " + escaped(named) + "\n")
+            with self.assertRaises(evidence.GateError):
+                runtime.rust_inputs(target, saved)
 
     def test_published_binary_hashes_must_match_the_actual_compile_receipts(self):
         names = ["tenraid.exe", "tenrai-release.exe", "tenrai-wallet.exe", "tenrai-miner.exe",
