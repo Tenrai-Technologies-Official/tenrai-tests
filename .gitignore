@@ -1,0 +1,17 @@
+target/
+__pycache__/
+p2p-bench/run/
+p2p-bench/run-*/
+p2p-bench/bin-*/
+p2p-bench/results/
+p2p-bench/*.out
+mesh/run/
+topology/run/
+topology/results/
+browser-wallet/data/
+qualification/run/
+browser-prover/compare-work/
+*.log
+*.exe
+.env
+.env.*

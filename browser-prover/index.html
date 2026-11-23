@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>browser prover</title>
+</head>
+<body>
+<pre id="log"></pre>
+<script type="module">
+// Proves the inputs the server lists, or the one `?input=` names, each in a fresh worker of the prover
+// package with `?threads=` threads (none: the build without threads), and leaves the outcome in
+// `window.results`; the title turns to "done" at the end.
+const log = (line) => { document.getElementById("log").textContent += `${line}\n`; };
+const hex = (bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+const query = new URLSearchParams(location.search);
+const threads = Number(query.get("threads") ?? 0);
+const only = query.get("input");
+// A worker that ended gives its memory back a moment later; proofs in a row may wait for it.
+const pause = Number(query.get("pause") ?? 0);
+const release = await (await fetch("/package/release.json")).json();
+const sha256 = {
+  plain: release.files["plain/tenrai_tsp2_prover_wasm_bg.wasm"],
+  threads: release.files["threads/tenrai_tsp2_prover_wasm_threads_bg.wasm"],
+};
+
+function proveIn(worker, input) {
+  const notes = [];
+  const stages = [];
+  const opened = performance.now();
+  return new Promise((resolve) => {
+    worker.onmessage = ({ data }) => {
+      if (data.note) notes.push(data.note);
+      else if (data.stage) stages.push([data.stage, Math.round(performance.now() - opened)]);
+      else if (data.proof) resolve({ ok: true, proof: data.proof, memory_bytes: data.memory_bytes, ms: performance.now() - opened, notes, stages });
+      else resolve({ ok: false, error: data.failed, ms: performance.now() - opened, notes, stages });
+    };
+    worker.onerror = (event) => resolve({ ok: false, error: event.message || "the worker stopped", ms: performance.now() - opened, notes, stages });
+    worker.postMessage({ input, threads, sha256 }, [input]);
+  });
+}
+
+const results = [];
+window.results = results;
+const names = (await (await fetch("/inputs/")).json()).filter((name) => !only || name === only);
+log(`cross-origin isolated: ${self.crossOriginIsolated}, threads: ${threads}, inputs: ${names.length}`);
+for (const name of names) {
+  const input = await (await fetch(`/inputs/${name}`)).arrayBuffer();
+  const worker = new Worker("/package/worker.js", { type: "module" });
+  const outcome = await proveIn(worker, input);
+  worker.terminate();
+  if (pause) await new Promise((done) => setTimeout(done, pause));
+  const entry = { name, threads, ok: outcome.ok, prove_ms: outcome.ms, memory_bytes: outcome.memory_bytes ?? null,
+                  error: outcome.error ?? null, notes: outcome.notes, stages: outcome.stages };
+  if (outcome.ok) {
+    entry.proof_bytes = outcome.proof.byteLength;
+    entry.proof_sha256 = hex(await crypto.subtle.digest("SHA-256", outcome.proof));
+    entry.proof_hex = hex(outcome.proof);
+  }
+  results.push(entry);
+  log(`${name}: ${entry.ok ? "proof" : "refused"} in ${Math.round(entry.prove_ms)} ms, memory ${Math.round((entry.memory_bytes ?? 0) / 1048576)} MiB ${entry.error ?? ""}`);
+}
+document.title = "done";
+</script>
+</body>
+</html>

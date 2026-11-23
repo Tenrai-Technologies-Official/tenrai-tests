@@ -1,0 +1,4 @@
+# LF everywhere; Windows batch files keep CRLF for cmd.exe.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
