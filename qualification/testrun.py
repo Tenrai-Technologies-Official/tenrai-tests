@@ -383,7 +383,7 @@ def run(name, filter_, settings):
         result["allowed_background_images"] = settings["allowed_images"]
         result["allowed_background_at_check"] = record.get("allowed_background", [])
     (folder / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    print(f"{name} {filter_}: exit {result['exit']} (native {code}), {result['passed']} passed, {result['failed']} failed of "
+    print(f"{name} {filter_}: exit {result['exit']} (native {result['native_exit']}), {result['passed']} passed, {result['failed']} failed of "
           f"{record['tests']} in {result['seconds']} s; {folder}", flush=True)
     for failure in result["failures"]:
         print("    FAILED", failure, flush=True)

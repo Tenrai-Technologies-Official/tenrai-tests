@@ -233,12 +233,14 @@ class CommandSourceBoundaries(unittest.TestCase):
                  "sources_before": {str(self.repo): {"files": {"source.rs": evidence.sha(source)}}}}
         checked = runtime.rust_inputs(target, saved)
         self.assertEqual(checked["local_inputs_sha256"], {str(source.resolve()): evidence.sha(source)})
-        # Missing build-script watch paths do not count as inputs.
+        # A rerun-if-changed path that does not exist (a sidecar named by default, an absent capabilities folder) was
+        # never read; it is no input, while an existing unlisted file still refuses.
         absent = [self.repo / "capabilities", self.repo / "prover/x86_64-pc-windows-msvc/tool.exe"]
         target.with_suffix(".d").write_text(escaped(target) + ": " + " ".join(escaped(path) for path in [source, *absent]) + "\n")
         checked = runtime.rust_inputs(target, saved)
         self.assertEqual(checked["local_inputs_sha256"], {str(source.resolve()): evidence.sha(source)})
-        # Resolve relative paths from the build workspace.
+        # rustc's own dep-info of a test harness names workspace sources relative to the workspace root; they resolve
+        # against the source root that holds them, whatever this process's working folder is.
         target.with_suffix(".d").write_text(escaped(target) + ": " + escaped(source.name) + " missing.rs\n")
         checked = runtime.rust_inputs(target, saved)
         self.assertEqual(checked["local_inputs_sha256"], {str(source.resolve()): evidence.sha(source)})

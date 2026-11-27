@@ -185,6 +185,21 @@ class RequiredResults(unittest.TestCase):
             self.assertFalse(result["qualified"])
             self.assertTrue(result["qualification_failures"])
 
+    def test_a_sharded_run_reports_its_summary_and_exits_with_its_result(self):
+        with tempfile.TemporaryDirectory(prefix="tenrai-testrun-shards-") as temporary:
+            configured = testrun.options(["--min-tests", "2", "--shards", "2"])
+            configured["out"] = temporary
+            combined = {"exit": 0, "native_exit": 0, "qualified": True, "qualification_failures": [], "passed": 2,
+                        "failed": 0, "ignored": 0, "failures": [], "expected_tests": 2, "timed_out": False}
+            record = {"tests": 2, "binary": __file__, "sha256": "fixture", "test_names": [FIRST, SECOND]}
+            with patch.object(testrun, "check", return_value=(record, [])), \
+                    patch.object(testrun, "fresh_admission", return_value=None), \
+                    patch.object(testrun, "run_shards", return_value=dict(combined)):
+                with self.assertRaises(SystemExit) as stopped:
+                    testrun.run("fixture", "cross_pool", configured)
+            self.assertEqual(stopped.exception.code, 0)
+            self.assertEqual(len(list(Path(temporary).glob("*/result.json"))), 1)
+
     def test_an_ordinary_suite_can_still_report_other_ignored_cases(self):
         configured = testrun.options(["--no-ignored"])
         result = testrun.qualified_result(summary(1, ignored=1), 2, configured, 0)

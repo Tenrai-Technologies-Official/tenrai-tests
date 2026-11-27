@@ -1,13 +1,13 @@
 # Release qualification
 
-The release driver builds and verifies a mainnet candidate from the selected
+The release driver builds and verifies the mainnet release from the selected
 source checkouts and genesis inputs. It uses Git Bash, PowerShell, Python
 3.14, Node.js and the pinned Rust toolchain on Windows.
 
-Keep the component repositories beside this checkout. `TENRAI_REPO` selects
-the node checkout, and `TENRAI_MAINNET_FILES` selects the operator's mainnet
-inputs. Use an output directory outside the source repositories. Set
-`TENRAI_RELEASE_OUT` or pass `--out` to choose it.
+Keep the component repositories beside this checkout. The default node checkout
+is `tenrai`. Set `TENRAI_REPO` to use another checkout and `TENRAI_MAINNET_FILES`
+to select the operator's mainnet inputs. Choose an output directory outside
+the source repositories with `TENRAI_RELEASE_OUT` or `--out`.
 
 ```sh
 bash build-release.sh --treasury "TREASURY_ADDRESS" --fingerprint "TRAI-XXXX-XXXX" \
@@ -19,6 +19,14 @@ flag must match the node rules. Use `--reuse-current-treasury` when retaining
 the current treasury. `--rehearse` checks the genesis separately.
 `--from PHASE` resumes a candidate with its recorded inputs, and
 `--until PHASE` limits a run to the named phase.
+
+`--from checks --resume` continues a stopped checks phase without running
+its passed checks again. A passed check is kept only if its log is the one
+its command recorded and that command is the latest of its name. The command
+must also still meet every rule of the final verification, and its test runs
+must have used one frozen test binary whose bytes are unchanged. Every other
+check runs again, in the attempt folder of that binary, so the new checks use
+the same binary. The final verification still checks every command.
 
 | Phase | Output |
 | --- | --- |

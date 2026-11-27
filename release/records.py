@@ -26,11 +26,13 @@ import uuid
 from itertools import combinations
 from pathlib import Path
 
+from node_checkout import node_checkout
+
 import release_evidence as evidence
 import release_runtime as runtime
 
 GITHUB = Path(__file__).resolve().parents[2]
-REPO = Path(os.environ.get("TENRAI_REPO", GITHUB / "tenrai-core"))
+REPO = node_checkout(GITHUB)
 FILES = Path(os.environ.get("TENRAI_MAINNET_FILES", GITHUB / "tenrai-mainnet-files"))
 # Each document with the section that states the identity (None: the whole file).
 DOCUMENTS = [
@@ -293,9 +295,12 @@ def release_record(arguments):
         qualification = evidence.qualify(work, out)
         command_sources = runtime.require_final(work)
         identity = evidence.identity_inputs(work)["record"]
+        prover = REPO / "crates/tsp2/prover-wasm"
+        if not (prover / "Cargo.toml").is_file():
+            prover = REPO / "crates/tsp2-prover-wasm"
         packages = {}
         for name, folder in (("wallet", REPO / "crates/wasm/pkg"), ("tenq", REPO / "crates/tenq-wasm/pkg"),
-                             ("prover", REPO / "crates/tsp2-prover-wasm/package")):
+                             ("prover", prover / "package")):
             release = evidence.load(folder / "release.json")
             packages[name] = {key: value for key, value in release.items() if key != "files"}
         record = {

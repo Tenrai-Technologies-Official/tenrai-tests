@@ -44,8 +44,11 @@ RESULTS = TOOLS / "results"
 BENCH_TX = TOOLS / "bench-tx" / "target" / "release" / "bench-tx.exe"
 WAN_PROXY = TOOLS / "wan-proxy" / "target" / "release" / "wan-proxy.exe"
 BENCH_PRIVATE = TOOLS / "bench-private" / "target" / "release" / "bench-private.exe"
+PROVER_CRATE = REPO / "crates/tsp2/prover"
+if not (PROVER_CRATE / "Cargo.toml").is_file():
+    PROVER_CRATE = REPO / "crates/tsp2-prover"
 PROVER = Path(os.environ.get("TENRAI_TSP2_PROVER",
-                             REPO / "crates" / "tsp2-prover" / "target" / "release" / "tenrai-tsp2-prove.exe"))
+                             PROVER_CRATE / "target/release/tenrai-tsp2-prove.exe"))
 SPENDERS = 1000
 # The genesis takes 1,024 allocations, so a chain with private transfers funds fewer spenders.
 PRIVATE_SPENDERS = 880

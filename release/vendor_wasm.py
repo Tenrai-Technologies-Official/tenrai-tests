@@ -4,13 +4,14 @@
 """
 
 import json
-import os
 import re
 import shutil
 from pathlib import Path
 
+from node_checkout import node_checkout
+
 GITHUB = Path(__file__).resolve().parents[2]
-REPO = Path(os.environ.get("TENRAI_REPO", GITHUB / "tenrai-core"))
+REPO = node_checkout(GITHUB)
 PACKAGE = REPO / "crates" / "wasm" / "pkg"
 FILES = ("README.md", "browser-source-inputs.json", "package.json", "release.json", "tenrai_wasm.d.ts",
          "tenrai_wasm.js", "tenrai_wasm_bg.wasm", "tenrai_wasm_bg.wasm.d.ts")

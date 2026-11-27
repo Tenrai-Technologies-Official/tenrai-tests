@@ -15,8 +15,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+from node_checkout import node_checkout
+
 WORKSPACE = Path(__file__).resolve().parents[2]
-REPO = Path(os.environ.get("TENRAI_REPO", WORKSPACE / "tenrai-core"))
+REPO = node_checkout(WORKSPACE)
 FILES = Path(os.environ.get("TENRAI_MAINNET_FILES", WORKSPACE / "tenrai-mainnet-files"))
 VALIDATORS = ["validator1", "validator2", "validator3"]
 TOTAL_ATOMS = 20_000_000 * 100_000_000

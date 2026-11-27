@@ -17,8 +17,9 @@ import release_evidence as evidence
 SCHEMA = "tenrai-release-command-boundary/v1"
 LOCKS = (
     ".cargo/config", ".cargo/config.toml", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml",
-    "crates/tsp2-prover/Cargo.lock", "crates/tsp2-circuits/Cargo.lock",
-    "crates/tsp2-prover-wasm/Cargo.lock", "vendor/tsp2-proving-backend/Cargo.lock",
+    "crates/tsp2/prover/Cargo.lock", "crates/tsp2/circuits/Cargo.lock", "crates/tsp2/prover-wasm/Cargo.lock",
+    "crates/tsp2-prover/Cargo.lock", "crates/tsp2-circuits/Cargo.lock", "crates/tsp2-prover-wasm/Cargo.lock",
+    "vendor/tsp2-proving-backend/Cargo.lock",
 )
 FIRST_PARTY = ("wasm", "prover", "vendor/tenrai-wasm", "vendor/tenrai-prover",
                "vendor/tenrai-sdk", "public/vendor/tenq", "node_modules/@tenrai/sdk")
@@ -310,10 +311,11 @@ def rust_inputs(artifact, saved):
     for name in words:
         path = Path(name)
         if not path.is_absolute():
-            # rustc records relative paths from the build workspace.
+            # rustc's own dep-info (a test harness in deps/) names workspace sources relative to the workspace root it
+            # ran in, which is one of the source roots; never this process's working folder.
             bases = [root for root in roots if (root / path).exists()]
             if not bases:
-                continue  # Unused build-script watch path.
+                continue  # A relative rerun-if-changed path that exists under no source root was never read.
             require(len(bases) == 1, f"compiled input is ambiguous between source roots: {name}")
             path = bases[0] / path
         path = path.resolve()
@@ -323,7 +325,7 @@ def rust_inputs(artifact, saved):
             if path.is_relative_to(root):
                 relative = path.relative_to(root).as_posix()
                 if relative not in files and not path.exists():
-                    break  # A missing watch path contributes no input.
+                    break  # A build script's rerun-if-changed path that does not exist was never read.
                 require(relative in files, f"compiled local input was outside the before-inventory: {path}")
                 require(evidence.sha(path) == files[relative], f"compiled local input changed: {path}")
                 local[str(path)] = files[relative]
@@ -418,6 +420,13 @@ def end(arguments):
         if cargo_log:
             record["production_profiles"] = production_profiles(
                 cargo_log, {artifact: {"sources": saved["sources_before"]} for artifact in cargo_artifacts})
+        # The command's own log, so that a resumed release can tell which result belongs to which command.
+        log = getattr(arguments, "log", None)
+        if log:
+            path = Path(log).resolve()
+            require(path.is_relative_to(work) and path.is_file() and not Path(log).is_symlink(),
+                    f"the command log is no file of this release: {path}")
+            record["log"] = {"path": str(path), "sha256": evidence.sha(path)}
         record["status"] = "PASS" if arguments.exit_code == 0 else "FAIL"
     except Exception as error:
         record["reason"] = str(error)
@@ -427,6 +436,33 @@ def end(arguments):
     if record["status"] != "PASS":
         return arguments.exit_code or 2
     return 0
+
+def check_boundary(name, ticket, saved, after):
+    """The rules a recorded command must still meet for a release; the error names the first one it breaks."""
+    require(after is not None, f"{name} has no finished command boundary")
+    require(saved.get("status") == "READY" and saved["preflight_exit"] == 0, f"{name} was never admitted")
+    require(after.get("status") == "PASS" and after.get("native_exit_code") == 0, f"{name} did not pass")
+    require(after["ticket_sha256"] == evidence.sha(ticket), f"{name} source receipt changed")
+    require(stable_controls(saved["controls_sha256"]), f"{name} qualification controls changed")
+    if saved.get("kind") != "setup":
+        require(stable_inputs(saved["input_guards"]), f"{name} explicit/frozen inputs changed")
+    require(evidence.sha(ticket.with_name("preflight.json")) == saved["preflight_sha256"],
+            f"{name} preflight changed")
+    if saved.get("kind") == "mutation":
+        require(permitted_mutation(saved["sources_before"], after["sources_after"], saved["allowed_changes"]),
+                f"{name} has an unauthorized source mutation")
+    else:
+        require(after.get("sources_after") == saved.get("sources_before"), f"{name} sources differ")
+    if after.get("production_profiles"):
+        profile = after["production_profiles"]
+        require(evidence.sha(Path(profile["log"])) == profile["sha256"], f"{name} actual Cargo log changed")
+    if saved.get("kind") in ("build", "test"):
+        require(sources(saved["sources_before"]) == saved["sources_before"],
+                f"{name} build/test inputs changed afterwards; rebuild this command before release")
+        require(input_files([], after.get("artifact_trees", {}))["frozen_folders"]
+                == after.get("artifact_trees", {}), f"{name} artifact membership/bytes changed afterwards")
+        require(all(evidence.sha(Path(path)) == value for path, value in after["artifacts_sha256"].items()),
+                f"{name} artifact changed afterwards")
 
 def verify(arguments, allow_identity_mutation=False):
     work = evidence.artifact_root(arguments.work)
@@ -441,30 +477,7 @@ def verify(arguments, allow_identity_mutation=False):
         if (allow_identity_mutation and name == "records-identity"
                 and saved.get("kind") == "mutation" and after is None):
             continue
-        require(after is not None, f"{name} has no finished command boundary")
-        require(saved.get("status") == "READY" and saved["preflight_exit"] == 0, f"{name} was never admitted")
-        require(after.get("status") == "PASS" and after.get("native_exit_code") == 0, f"{name} did not pass")
-        require(after["ticket_sha256"] == evidence.sha(ticket), f"{name} source receipt changed")
-        require(stable_controls(saved["controls_sha256"]), f"{name} qualification controls changed")
-        if saved.get("kind") != "setup":
-            require(stable_inputs(saved["input_guards"]), f"{name} explicit/frozen inputs changed")
-        require(evidence.sha(ticket.with_name("preflight.json")) == saved["preflight_sha256"],
-                f"{name} preflight changed")
-        if saved.get("kind") == "mutation":
-            require(permitted_mutation(saved["sources_before"], after["sources_after"], saved["allowed_changes"]),
-                    f"{name} has an unauthorized source mutation")
-        else:
-            require(after.get("sources_after") == saved.get("sources_before"), f"{name} sources differ")
-        if after.get("production_profiles"):
-            profile = after["production_profiles"]
-            require(evidence.sha(Path(profile["log"])) == profile["sha256"], f"{name} actual Cargo log changed")
-        if saved.get("kind") in ("build", "test"):
-            require(sources(saved["sources_before"]) == saved["sources_before"],
-                    f"{name} build/test inputs changed afterwards; rebuild this command before release")
-            require(input_files([], after.get("artifact_trees", {}))["frozen_folders"]
-                    == after.get("artifact_trees", {}), f"{name} artifact membership/bytes changed afterwards")
-            require(all(evidence.sha(Path(path)) == value for path, value in after["artifacts_sha256"].items()),
-                    f"{name} artifact changed afterwards")
+        check_boundary(name, ticket, saved, after)
         results[name] = {"kind": saved["kind"], "before_sha256": evidence.sha(ticket),
                          "after_sha256": evidence.sha(ticket.with_name("after.json"))}
     published = published_artifacts(work, by_name) if getattr(arguments, "final_artifacts", False) else None
@@ -606,6 +619,7 @@ def main():
     finish.add_argument("--cargo-artifact", action="append", default=[])
     finish.add_argument("--cargo-log")
     finish.add_argument("--artifact-tree", action="append", default=[])
+    finish.add_argument("--log")
     check = sub.add_parser("verify")
     check.add_argument("--work", required=True)
     check.add_argument("--require", action="append", default=[])

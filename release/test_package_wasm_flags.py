@@ -8,7 +8,9 @@ import sys
 import tempfile
 import unittest
 
-REPO = Path(os.environ.get("TENRAI_REPO", Path(__file__).resolve().parents[2] / "tenrai-core"))
+from node_checkout import node_checkout
+
+REPO = node_checkout(Path(__file__).resolve().parents[2])
 DRIVER = REPO / "scripts/package-wasm.ps1"
 POWERSHELL = shutil.which("powershell.exe") if os.name == "nt" else None
 VARIABLES = ("RUSTFLAGS", "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS",

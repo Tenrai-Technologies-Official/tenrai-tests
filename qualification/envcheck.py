@@ -92,8 +92,8 @@ def main():
         reasons.append("other processes would share the machine: " + ", ".join(others))
     for reason in reasons:
         print("preflight refused:", reason)
-    if not reasons:
-        print(f"preflight passed: commit free {memory['free_commit_gb']} GB")
+    state = f"commit free {memory['free_commit_gb']} GB, RAM free {memory['free_physical_gb']} GB"
+    print(("preflight passed: " if not reasons else "preflight state: ") + state)
     sys.exit(3 if reasons else 0)
 
 

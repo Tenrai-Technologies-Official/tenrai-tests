@@ -31,8 +31,10 @@ import release_identity as identity_history
 import time
 from pathlib import Path
 
+from node_checkout import node_checkout
+
 GITHUB = Path(__file__).resolve().parents[2]
-REPO = Path(os.environ.get("TENRAI_REPO", GITHUB / "tenrai-core"))
+REPO = node_checkout(GITHUB)
 FILES = Path(os.environ.get("TENRAI_MAINNET_FILES", GITHUB / "tenrai-mainnet-files"))
 CONSENSUS = REPO / "crates" / "primitives" / "src" / "params" / "consensus.rs"
 VALIDATORS = ["validator1", "validator2", "validator3"]

@@ -10,7 +10,11 @@ $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $tests = (Resolve-Path -LiteralPath (Join-Path $here '..')).Path
 $github = (Resolve-Path -LiteralPath (Join-Path $tests '..')).Path
-$repo = if ($env:TENRAI_REPO) { $env:TENRAI_REPO } else { Join-Path $github 'tenrai-core' }
+$repo = $env:TENRAI_REPO
+if (!$repo) {
+    $repo = py -3.14 -E -s -B (Join-Path $here 'node_checkout.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the node checkout.' }
+}
 $runtime = Join-Path $here 'release_runtime.py'
 $guard = Join-Path $tests 'qualification\envcheck.py'
 $started = Get-Date
@@ -107,7 +111,11 @@ finally { Pop-Location }
 $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repo 'scripts\package-prover.ps1'),
     '-Jobs', "$Jobs", '-PreflightScript', $guard, '-TargetRoot', (Join-Path $scratchAttempt 'prover-target'))
 if ($Holder) { $arguments += @('-Holder', $Holder) }
-Run-Step 'prover-build' 'build' @($repo) @() 'powershell' $arguments @((Join-Path $repo 'crates\tsp2-prover-wasm\package')) @()
+$prover = Join-Path $repo 'crates/tsp2/prover-wasm'
+if (!(Test-Path -LiteralPath (Join-Path $prover 'Cargo.toml') -PathType Leaf)) {
+    $prover = Join-Path $repo 'crates/tsp2-prover-wasm'
+}
+Run-Step 'prover-build' 'build' @($repo) @() 'powershell' $arguments @((Join-Path $prover 'package')) @()
 Step 'browser prover built'
 Run-Step 'vendor-prover' 'mutation' @($repo, $sdk, $wallet) @("$sdk=prover", "$sdk=src/wallet/prover-pins.ts", "$wallet=vendor/tenrai-prover") 'py' @('-3.14', '-E', '-s', '-B', (Join-Path $here 'vendor_prover.py'))
 Step 'done'

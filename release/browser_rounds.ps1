@@ -16,7 +16,11 @@ $knownRuns = @('normal', 'normal-long', 'plain', 'gateway', 'firefox', 'referenc
 foreach ($run in $Runs) { if ($run -notin $knownRuns) { throw "unknown run $run" } }
 $tests = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $github = (Resolve-Path -LiteralPath (Join-Path $tests '..')).Path
-$repo = if ($env:TENRAI_REPO) { $env:TENRAI_REPO } else { Join-Path $github 'tenrai-core' }
+$repo = $env:TENRAI_REPO
+if (!$repo) {
+    $repo = py -3.14 -E -s -B (Join-Path $PSScriptRoot 'node_checkout.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the node checkout.' }
+}
 $runtime = Join-Path $PSScriptRoot 'release_runtime.py'
 $guard = Join-Path $tests 'qualification\envcheck.py'
 $python = (Get-Command py -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source

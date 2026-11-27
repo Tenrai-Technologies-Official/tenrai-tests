@@ -4,13 +4,17 @@
 """
 
 import json
-import os
 import shutil
 from pathlib import Path
 
+from node_checkout import node_checkout
+
 GITHUB = Path(__file__).resolve().parents[2]
-REPO = Path(os.environ.get("TENRAI_REPO", GITHUB / "tenrai-core"))
-PACKAGE = REPO / "crates" / "tsp2-prover-wasm" / "package"
+REPO = node_checkout(GITHUB)
+PROVER = REPO / "crates/tsp2/prover-wasm"
+if not (PROVER / "Cargo.toml").is_file():
+    PROVER = REPO / "crates/tsp2-prover-wasm"
+PACKAGE = PROVER / "package"
 
 release = json.loads((PACKAGE / "release.json").read_text(encoding="utf-8-sig"))
 names = {path.relative_to(PACKAGE).as_posix() for path in PACKAGE.rglob("*") if path.is_file()}

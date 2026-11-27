@@ -18,8 +18,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+from node_checkout import node_checkout
+
 GITHUB = Path(__file__).resolve().parents[2]
-REPO = Path(os.environ.get("TENRAI_REPO", GITHUB / "tenrai-core"))
+REPO = node_checkout(GITHUB)
 FILES = Path(os.environ.get("TENRAI_MAINNET_FILES", GITHUB / "tenrai-mainnet-files"))
 KEYS = FILES / "release-signing"
 PUBLISHED = ["bin", "web", "sdk", "wasm", "desktop", "config", "docs", "genesis", "checks"]

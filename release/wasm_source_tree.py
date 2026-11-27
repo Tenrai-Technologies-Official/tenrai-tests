@@ -15,13 +15,17 @@ browser miner check them against release.json when they take a package.
 import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
 from pathlib import Path
 
-REPO = Path(os.environ.get("TENRAI_REPO", Path(__file__).resolve().parents[2] / "tenrai-core"))
+from node_checkout import node_checkout
+
+REPO = node_checkout(Path(__file__).resolve().parents[2])
+VERIFIER_MANIFEST = "crates/tsp2/verifier/Cargo.toml"
+if not (REPO / VERIFIER_MANIFEST).is_file():
+    VERIFIER_MANIFEST = "crates/tsp2-verifier/Cargo.toml"
 SKIP = {"target", "pkg", "pkg-threads", "node_modules", ".git", "__pycache__"}
 PACKAGES = {
     "wallet": {
@@ -29,7 +33,7 @@ PACKAGES = {
         "release": "tenrai-wasm",
         "folder": "crates/wasm",
         "inventory": "browser-source-inputs.json",
-        "required": ["crates/wasm/Cargo.toml", "crates/tsp2-verifier/Cargo.toml"],
+        "required": ["crates/wasm/Cargo.toml", VERIFIER_MANIFEST],
         "assets": {"module": "tenrai_wasm.js", "wasm": "tenrai_wasm_bg.wasm"},
         "declarations": ["tenrai_wasm.d.ts", "tenrai_wasm_bg.wasm.d.ts"],
     },
@@ -140,13 +144,15 @@ def record(out, package):
         if required not in inputs:
             raise SystemExit(f"{required} is missing from the source closure")
     revision = hashlib.sha256(json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    status = subprocess.run(["git", "--no-optional-locks", "status", "--porcelain"], cwd=REPO,
+                            capture_output=True, check=False)
     write_json(out / package["inventory"], {
         "format": 2,
         "package": package["release"],
         "target": "wasm32-unknown-unknown",
         "source_tree_sha256": revision,
         "git_base_revision": base_revision(),
-        "candidate_has_uncommitted_changes": True,
+        "candidate_has_uncommitted_changes": status.returncode != 0 or bool(status.stdout),
         "input_scope": f"all files of the local packages cargo tree resolves for {package['crate']} on wasm32, "
                        "plus workspace, toolchain, packaging and genesis config inputs; build output folders excluded",
         "proof_verification_bypassed": False,

@@ -84,7 +84,9 @@ step sdk-types test --repo "$SDK" -- npx tsc --noEmit -p .
 # The certified SDK and wallet tests replay proofs that a native run of these very binaries captured.
 CAPTURE=$(cygpath -w "$ATTEMPT/native-capture")
 NATIVE="$CAPTURE\\synthetic-native-public-vectors.json"
-CORE=$(cygpath -w "${TENRAI_REPO:-$GITHUB/tenrai-core}")
+node_checkout=${TENRAI_REPO:-}
+[ -n "$node_checkout" ] || node_checkout=$(py -3.14 -E -s -B "$HERE/node_checkout.py") || exit 2
+CORE=$(cygpath -w "$node_checkout") || exit 2
 PYTHON=$(py -3.14 -E -s -B -c "import sys; print(sys.executable)")
 step sdk-capture test --repo "$SDK" -- node "$GITHUB/tenrai-tests/browser-wallet/e2e-production.mjs" --mode native --capture \
   --data "$CAPTURE" --repo "$CORE" --sdk "$(cygpath -w "$SDK")" \

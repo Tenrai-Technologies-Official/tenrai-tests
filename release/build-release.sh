@@ -2,11 +2,13 @@
 # The mainnet release set, from the genesis inputs to frozen and checked binaries and packages; README.md describes it.
 #   bash build-release.sh --treasury trai1... --fingerprint TRAI-XXXX-XXXX --bonds A,B,C --private-from-genesis yes|no
 #                         [--reuse-current-treasury] [--out DIR] [--rehearse] [--from PHASE] [--until PHASE]
-#                         [--holder NAME] [--jobs N] [--fail-fast]
+#                         [--holder NAME] [--jobs N] [--fail-fast] [--resume]
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TESTS="$(cd "$HERE/.." && pwd)"
 GITHUB="$(cd "$TESTS/.." && pwd)"
-REPO=$(cygpath -au "${TENRAI_REPO:-$GITHUB/tenrai-core}") || exit 2
+node_checkout=${TENRAI_REPO:-}
+[ -n "$node_checkout" ] || node_checkout=$(py -3.14 -E -s -B "$HERE/node_checkout.py") || exit 2
+REPO=$(cygpath -au "$node_checkout") || exit 2
 FILES=$(cygpath -au "${TENRAI_MAINNET_FILES:-$GITHUB/tenrai-mainnet-files}") || exit 2
 TENRAI_REPO=$(cygpath -w "$REPO") || exit 2
 TENRAI_MAINNET_FILES=$(cygpath -w "$FILES") || exit 2
@@ -16,7 +18,7 @@ PHASES="genesis binaries wasm web desktop checks records"
 unset RUST_LOG
 
 treasury='' fingerprint='' bonds='' private='' reuse_current='' out='' rehearse=0 from=genesis until='' holder='' jobs=1
-fail_fast=0
+fail_fast=0 resume=0
 while [ $# -gt 0 ]; do
   case "$1" in --treasury|--fingerprint|--bonds|--private-from-genesis|--out|--from|--until|--holder|--jobs)
     [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 2; } ;;
@@ -34,11 +36,13 @@ while [ $# -gt 0 ]; do
     --holder) holder=$2; shift 2 ;;
     --jobs) jobs=$2; shift 2 ;;
     --fail-fast) fail_fast=1; shift ;;
+    --resume) resume=1; shift ;;
     *) echo "unknown argument $1"; exit 2 ;;
   esac
 done
 case " $PHASES " in *" $from "*) ;; *) echo "--from names no phase of: $PHASES"; exit 2 ;; esac
 case " $PHASES " in *" ${until:-records} "*) ;; *) echo "--until names no phase of: $PHASES"; exit 2 ;; esac
+[ $resume -eq 0 ] || [ "$from" = checks ] || { echo "--resume goes on with the checks phase: --from checks --resume"; exit 2; }
 OUT="${out:-${TENRAI_RELEASE_OUT:-$GITHUB/tenrai-release-artifacts/rc-$(date +%Y%m%d)}}"
 OUT="$(cygpath -au "$OUT")" || exit 2
 if [ $rehearse -eq 1 ]; then
@@ -49,6 +53,8 @@ L="$OUT/logs"
 
 win() { cygpath -w "$1"; }
 say() { echo "$(date +%H:%M:%S) $*" | tee -a "$OUT/release.log"; }
+# A stopped checks phase goes on with the checks that passed kept.
+goes_on() { [ "$PHASE" != checks ] || printf ' --resume'; }
 
 # Refuse repository destinations before creating a raw log, table or receipt.
 py -3.14 -E -s -B -c 'import sys; sys.path.insert(0, sys.argv[1]); from release_evidence import artifact_root; artifact_root(sys.argv[2])' \
@@ -99,11 +105,23 @@ case "$reuse_current" in yes|no) ;; *) echo "invalid recorded treasury reuse cho
 case "$jobs" in ''|*[!0-9]*|0) echo "--jobs must be a positive integer"; exit 2 ;; esac
 [ "$jobs" -le 64 ] || { echo "--jobs must not exceed 64"; exit 2; }
 RUNTIME="$HERE/release_runtime.py"
+RESUME="$HERE/release_resume.py"
 mkdir -p "$OUT/scratch" || exit 1
-SCRATCH=$(mktemp -d "$OUT/scratch/attempt-XXXXXXXX") || exit 1
+# A resumed checks phase goes on in the attempt whose frozen test binary its kept checks ran, so that the checks still
+# to run use that binary too; its logs go into a folder of their own.
+RESUMED=''
+if [ $resume -eq 1 ]; then
+  RESUMED=$(py -3.14 -E -s -B "$RESUME" resumable --work "$(win "$OUT")" --phase checks) || exit 2
+fi
+if [ -n "$RESUMED" ]; then
+  SCRATCH="$OUT/scratch/$RESUMED"
+  L=$(mktemp -d "$OUT/logs/$RESUMED-resume-XXXXXXXX") || exit 1
+else
+  SCRATCH=$(mktemp -d "$OUT/scratch/attempt-XXXXXXXX") || exit 1
+  L="$OUT/logs/$(basename "$SCRATCH")"
+  mkdir -p "$L" || exit 1
+fi
 mkdir -p "$SCRATCH/tmp" "$SCRATCH/targets" "$SCRATCH/test-cwd" || exit 1
-L="$OUT/logs/$(basename "$SCRATCH")"
-mkdir -p "$L" || exit 1
 export TMP="$(win "$SCRATCH/tmp")" TEMP="$(win "$SCRATCH/tmp")"
 export CARGO_BUILD_JOBS="$jobs" TENRAI_TEST_STORE="$(win "$SCRATCH/frozen-tests")" TENRAI_TEST_CWD="$(win "$SCRATCH/test-cwd")"
 CORE_TARGET="$SCRATCH/targets/tests"
@@ -182,6 +200,7 @@ boundary_end() {
     desktop-release-build) [ "$code" -ne 0 ] || args+=(--cargo-artifact "$(win "$SCRATCH/desktop-release.exe")") ;;
     web-paper-wasm) [ "$code" -ne 0 ] || args+=(--artifact-tree "$(win "$SCRATCH/wasm-no-modules")") ;;
     web-artifacts) [ "$code" -ne 0 ] || args+=(--artifact-tree "$(win "$OUT/web")" --artifact-tree "$(win "$OUT/sdk")") ;;
+    check-*) args+=(--log "$(win "$L/$name.log")") ;;
   esac
   py -3.14 -E -s -B "$RUNTIME" end --work "$(win "$OUT")" --ticket "$ticket" --exit-code "$code" "${args[@]}"
 }
@@ -203,6 +222,12 @@ step() {
 check() {
   local name=$1 code admitted ticket
   shift
+  # A resumed phase holds only the rows whose results still belong to this build (release_resume.py keep).
+  if [ $resume -eq 1 ] && awk -F'\t' -v phase="$PHASE" -v name="$name" '$1 == phase && $2 == name && $3 == 0' \
+      "$OUT/checks.tsv" | grep -q .; then
+    say "check $name: kept, its result still belongs to this build"
+    return 0
+  fi
   if ticket=$(boundary_begin "check-$name" 2>"$L/check-$name.preflight.log"); then
     "$@" > "$L/check-$name.log" 2>&1; code=$?
     boundary_end "check-$name" "$ticket" "$code" > "$L/check-$name.source.log" 2>&1; admitted=$?
@@ -213,7 +238,7 @@ check() {
   say "check $name: exit $code"
   [ "$code" -eq 0 ] || grep -aE "FAIL|panicked|failed|error|refused" "$L/check-$name.log" | head -n 8 | cut -c1-200
   if [ "$code" -ne 0 ] && [ "$fail_fast" -eq 1 ]; then
-    say "release stopped at check $name of phase $PHASE (--fail-fast); after the fix it goes on with --from $PHASE"
+    say "release stopped at check $name of phase $PHASE (--fail-fast); after the fix it goes on with --from $PHASE$(goes_on)"
     exit 1
   fi
   return 0
@@ -334,8 +359,12 @@ phase_binaries() {
   step binaries-tenrai-explorer other tenrai-explorer "$GITHUB/tenrai-explorer" \
     "$SCRATCH/targets/tenrai-explorer/release/tenrai-explorer.exe" || return 1
   step binaries-tenrai-api other tenrai-api "$GITHUB/tenrai-api" "$GITHUB/tenrai-api/target/release/tenrai-api.exe" || return 1
-  step binaries-tenrai-tsp2-prove other tenrai-tsp2-prove "$REPO/crates/tsp2-prover" \
-    "$REPO/crates/tsp2-prover/target/release/tenrai-tsp2-prove.exe" || return 1
+  local prover="$REPO/crates/tsp2/prover"
+  if [[ ! -f "$prover/Cargo.toml" ]]; then
+    prover="$REPO/crates/tsp2-prover"
+  fi
+  step binaries-tenrai-tsp2-prove other tenrai-tsp2-prove "$prover" \
+    "$prover/target/release/tenrai-tsp2-prove.exe" || return 1
   owned_archive "$OUT/bin" || return 1
   step binaries-freeze freeze "$STAGE" "$OUT/bin" || return 1
   cat "$L/binaries-freeze.log" | tee -a "$OUT/release.log"
@@ -349,7 +378,9 @@ phase_wasm() {
   grep -aE "revision|built|verified|done" "$L/wasm-packages.log" | cut -c1-200 | tee -a "$OUT/release.log"
 }
 
-# Remap compiler and dependency paths before embedding the paper wallet WASM.
+# The web apps take the packages, build and test; the paper wallet embeds a no-modules wallet WASM. Like
+# scripts/package-wasm.ps1 its build names the dependency sources and the toolchain by neutral roots, so no path of the
+# building machine ships in it; the paper wallet refuses a WASM that still names one.
 paper_wasm() {
   local cargo_home sysroot pair source destination form flags=() seen=" "
   cargo_home=$(win "${CARGO_HOME:-$HOME/.cargo}")
@@ -446,7 +477,14 @@ node_tests_build() {
   (cd "$REPO" && CARGO_TARGET_DIR="$(win "$CORE_TARGET")" timeout 3600 \
     cargo test --release -p tenrai-node --lib --no-run --locked -j "$jobs")
 }
-node_freeze() { (cd "$Q" && py -3.14 -E -s -B testrun.py freeze "$1" "$2"); }
+# A resumed attempt froze its test binary before; its build must then have given exactly the frozen bytes.
+node_freeze() {
+  if [ -n "$RESUMED" ]; then
+    py -3.14 -E -s -B "$RESUME" frozen --store "$TENRAI_TEST_STORE" --name "$1" --binary "$2"
+    return
+  fi
+  (cd "$Q" && py -3.14 -E -s -B testrun.py freeze "$1" "$2")
+}
 testrun() {
   local name=$1 filter=$2
   shift 2
@@ -519,19 +557,13 @@ phase_checks() {
   # With private transfers from genesis, the private tests among these take the path of the mainnet.
   local genesis_env=()
   [ "$private" = yes ] && genesis_env=(--env TENRAI_PRIVATE_FROM_GENESIS=1)
-  # Run the shorter acceptance checks before the phased recovery and package runs.
+  # The checks that ran least come first, so that a failure among them stops the release early; the phased
+  # recoveries and package starts, over four hours together, come last of the acceptance checks.
   local acceptance=p2p::validator_overlay::decentralized_finality_tests
-  check full-nodes-alone testrun "$name" "$acceptance::full_nodes_alone::full_nodes_alone_carry_the_network" \
-    --expect "$acceptance::full_nodes_alone::full_nodes_alone_carry_the_network_and_a_validator_comes_back_after_they_let_go_of_its_height" \
-    "${genesis_env[@]}" --timeout 3600 --room "$room"
-  check three-full-nodes-alone testrun "$name" "$acceptance::full_nodes_alone::three_full_nodes_alone_stop" \
-    --expect "$acceptance::full_nodes_alone::three_full_nodes_alone_stop_for_a_restart_and_go_on" \
-    "${genesis_env[@]}" --timeout 3600 --room "$room"
-  check node-suite testrun "$name" "" --no-ignored --threads "$jobs" --timeout 3600 --room "$room"
   check decentralized-finality testrun "$name" decentralized_finality_tests --min-tests 7 \
     --expect p2p::validator_overlay::decentralized_finality_tests::three_validators_with_the_mainnet_split_wait_only_for_the_anchor \
     --shards 4 --weight conflicting_spends::wan=30 --weight relaunch_tests=20 \
-    --weight four_independent_validators_retire=15 "${genesis_env[@]}" --timeout 3600 --room "$room" -- \
+    --weight four_independent_validators_hold=12 "${genesis_env[@]}" --timeout 3600 --room "$room" -- \
     --skip started_from_a_package_carries_the_quorum --skip full_nodes_alone_carry_the_network \
     --skip three_full_nodes_alone_stop --skip private_long_offline::an_existing
   check finality-simulation testrun "$name" finality::simulation_tests --timeout 3600 --room "$room"
@@ -541,12 +573,20 @@ phase_checks() {
     --expect chain::private_tests::validators::cross_pool::executed_normal_work_filters_and_evicts_a_conflicting_enter_on_every_node \
     --timeout 3600 --room "$room"
   if [ "$private" = yes ]; then
+    # The two long offline recoveries run below, in phases of their own.
     check private-from-genesis testrun "$name" private --env TENRAI_PRIVATE_FROM_GENESIS=1 --min-tests 40 \
       --expect chain::private_tests::validators::cross_pool::a_finalized_enter_evicts_normal_payments_and_bonds_and_releases_their_leases \
       --expect chain::private_tests::validators::cross_pool::executed_normal_work_filters_and_evicts_a_conflicting_enter_on_every_node \
       --timeout 3600 --room "$room" -- --skip private_transfers_on_disk_measured --skip private_load \
       --skip private_long_offline
   fi
+  check full-nodes-alone testrun "$name" "$acceptance::full_nodes_alone::full_nodes_alone_carry_the_network" \
+    --expect "$acceptance::full_nodes_alone::full_nodes_alone_carry_the_network_and_a_validator_comes_back_after_they_let_go_of_its_height" \
+    "${genesis_env[@]}" --timeout 3600 --room "$room"
+  check three-full-nodes-alone testrun "$name" "$acceptance::full_nodes_alone::three_full_nodes_alone_stop" \
+    --expect "$acceptance::full_nodes_alone::three_full_nodes_alone_stop_for_a_restart_and_go_on" \
+    "${genesis_env[@]}" --timeout 3600 --room "$room"
+  check node-suite testrun "$name" "" --no-ignored --threads "$jobs" --timeout 3600 --room "$room"
   # Run recovery and snapshot checks in phases to stay within the per-test timeout.
   local offline="$acceptance::full_nodes_alone::private_long_offline::an_existing_full_node_recovers_private_money_from"
   check private-long-offline-pruned phases "$name" "$room" private-long-offline-pruned 8 \
@@ -603,9 +643,16 @@ for PHASE in $PHASES; do
   [ "$PHASE" = "$from" ] && started=1
   [ $started -eq 1 ] || continue
   say "== $PHASE"
-  # A phase run again replaces the checks it recorded before.
-  awk -F'\t' -v phase="$PHASE" '$1 != phase' "$OUT/checks.tsv" > "$OUT/checks.tsv.new" && mv -f "$OUT/checks.tsv.new" "$OUT/checks.tsv"
-  "phase_$PHASE" || { say "release stopped in phase $PHASE; after the fix it goes on with --from $PHASE"; exit 1; }
+  if [ $resume -eq 1 ] && [ "$PHASE" = "$from" ]; then
+    # A resumed phase keeps each check whose result still belongs to this build; every other row goes, its check runs.
+    py -3.14 -E -s -B "$RESUME" keep --work "$(win "$OUT")" --phase "$PHASE" --attempt "${RESUMED:-none}" \
+      --report "$(win "$L/kept-checks.json")" | tee -a "$OUT/release.log"
+    [ "${PIPESTATUS[0]}" -eq 0 ] || { say "the kept checks could not be confirmed; the phase goes on with --from $PHASE"; exit 1; }
+  else
+    # A phase run again replaces the checks it recorded before.
+    awk -F'\t' -v phase="$PHASE" '$1 != phase' "$OUT/checks.tsv" > "$OUT/checks.tsv.new" && mv -f "$OUT/checks.tsv.new" "$OUT/checks.tsv"
+  fi
+  "phase_$PHASE" || { say "release stopped in phase $PHASE; after the fix it goes on with --from $PHASE$(goes_on)"; exit 1; }
   if [ "$PHASE" = "$until" ] && [ "$PHASE" != records ]; then
     say "stopped after phase $PHASE as --until asked; the release record stays incomplete"
     exit 0
