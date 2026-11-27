@@ -14,7 +14,10 @@ from pathlib import Path
 from preflight import BINARIES, freeze
 
 TOOLS = Path(__file__).resolve().parent
-REPO = Path(os.environ.get("TENRAI_REPO", TOOLS.parents[1] / "tenrai-core"))
+sys.path.insert(0, str(TOOLS.parent))
+from release.node_checkout import node_checkout
+
+REPO = node_checkout(TOOLS.parents[1])
 
 
 def main():

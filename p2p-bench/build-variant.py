@@ -23,7 +23,10 @@ import tsp2_genesis_patches
 from preflight import BINARIES, freeze, frozen
 
 TOOLS = Path(__file__).resolve().parent
-REPO = Path(os.environ.get("TENRAI_REPO", TOOLS.parents[1] / "tenrai-core"))
+sys.path.insert(0, str(TOOLS.parent))
+from release.node_checkout import node_checkout
+
+REPO = node_checkout(TOOLS.parents[1])
 WORK = Path(os.environ.get("VARIANT_WORK", TOOLS / "run-build"))
 # VARIANT_BASE names another frozen folder to take the binaries a variant does not build from.
 MAIN = TOOLS / os.environ.get("VARIANT_BASE", "bin-main")
@@ -260,7 +263,7 @@ def main():
             shutil.rmtree(tool)
         shutil.copytree(TOOLS / "bench-private", tool, ignore=shutil.ignore_patterns("target"))
         manifest = tool / "Cargo.toml"
-        manifest.write_bytes(manifest.read_bytes().replace(b"../../../tenrai-core/crates", b"../crates"))
+        manifest.write_bytes(manifest.read_bytes().replace(b"../../../tenrai/crates", b"../crates"))
         subprocess.run(["cargo", "build", "--release", "--offline", "-j", jobs], cwd=tool, env=env, check=True)
         files["bench-private.exe"] = built / "bench-private.exe"
     # VARIANT_NAME freezes it under another name, so an earlier folder that results name stays as it is.

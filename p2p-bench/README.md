@@ -5,7 +5,7 @@ scenarios. Outputs include cut and finality rates, resource use and node logs.
 
 ## Setup
 
-Build the node binaries in release mode. Use a sibling `tenrai-core` checkout
+Build the node binaries in release mode. Use a sibling `tenrai` checkout
 or directory link so Cargo can resolve its local dependencies.
 
 From `p2p-bench/`, build the tools and freeze the node binaries.
@@ -33,7 +33,7 @@ dedicated data directories. Each run replaces its previous node data.
 
 | Variable | Default |
 | --- | --- |
-| `TENRAI_REPO` | Sibling `tenrai-core` checkout |
+| `TENRAI_REPO` | Sibling `tenrai` checkout |
 | `BENCH_DATA` | `run/` |
 | `BENCH_DATA2` | `run-secondary/` |
 | `BENCH_SNAPSHOTS` | `run-snapshots/` |

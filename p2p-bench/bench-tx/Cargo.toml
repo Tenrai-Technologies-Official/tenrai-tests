@@ -10,9 +10,9 @@ publish = false
 hex = "0.4.3"
 libcrux-ml-dsa = { version = "=0.0.10", default-features = false, features = ["mldsa65", "simd256"] }
 serde_json = "1.0.135"
-tenrai-auth = { path = "../../../tenrai-core/crates/auth" }
-tenrai-primitives = { path = "../../../tenrai-core/crates/primitives" }
-tenrai-traidag = { path = "../../../tenrai-core/crates/traidag" }
+tenrai-auth = { path = "../../../tenrai/crates/auth" }
+tenrai-primitives = { path = "../../../tenrai/crates/primitives" }
+tenrai-traidag = { path = "../../../tenrai/crates/traidag" }
 
 [profile.release]
 debug = false

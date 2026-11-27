@@ -5,9 +5,9 @@ development nodes with disposable data and test wallets.
 
 Use Python 3.14, Node.js 24, and the Rust toolchain in `rust-toolchain.toml` as
 required by each tool. Scripts that use the node checkout look for a sibling
-directory named `tenrai-core` by default. Set `TENRAI_REPO` or pass `--repo`
+directory named `tenrai` by default. Set `TENRAI_REPO` or pass `--repo`
 where supported. For Cargo's benchmark dependencies, a sibling checkout or
-directory link named `tenrai-core` works.
+directory link named `tenrai` works.
 
 | Tool | Purpose |
 | --- | --- |

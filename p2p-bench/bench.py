@@ -34,7 +34,10 @@ from bench_submit import (BUSY_RETRIES, Payments, count, is_busy, lifecycle, loa
                           wait_final)
 
 TOOLS = Path(__file__).resolve().parent
-REPO = Path(os.environ.get("TENRAI_REPO", TOOLS.parents[1] / "tenrai-core"))
+sys.path.insert(0, str(TOOLS.parent))
+from release.node_checkout import node_checkout
+
+REPO = node_checkout(TOOLS.parents[1])
 # Variants that change the chain's timing and with it the genesis; any other build shares main's snapshot.
 TIMINGS = ("cut3000", "t100", "tx12", "day512")
 DATA = Path(os.environ.get("BENCH_DATA", TOOLS / "run"))
